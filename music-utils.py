@@ -1,8 +1,16 @@
 import os
 import re
 from yt_dlp import YoutubeDL
+from urllib.parse import urlparse, parse_qs
 
-# Function to mask IP addresses in JSON string
+# ✅ Make sure audio output folder exists
+output_dir = os.path.join('static', 'audios')
+os.makedirs(output_dir, exist_ok=True)
+
+# ✅ Output template for MP3 file
+outtmpl = os.path.join(output_dir, '%(title)s.%(ext)s')
+
+# ✅ (Optional) Mask IPs in info files
 def mask_ip_addresses(json_str):
     return re.sub(
         r'(ip(?:=|%3D|\/))((?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|[0-9a-f]{1,4}(?:(?::|%3A)[0-9a-f]{1,4}){7})',
@@ -11,27 +19,35 @@ def mask_ip_addresses(json_str):
         flags=re.IGNORECASE
     )
 
-# Ensure the 'audios' directory exists
-output_dir = 'audios'
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+# ✅ Safe title for filenames
+def get_safe_title(title):
+    return ''.join(c if c.isalnum() else '_' for c in title)
 
-# Output template for saving MP3 files
-outtmpl = os.path.join('static', output_dir, '%(title)s.%(ext)s')
+# ✅ Extract YouTube video ID from URL
+def extract_video_id(url):
+    query = urlparse(url).query
+    return parse_qs(query).get("v", [None])[0]
 
+# ✅ Download YouTube audio with bypasses
 def youtube_down(link):
-    print("inside youtube_down")
+    print("🔍 Extracting video ID...")
+    video_id = extract_video_id(link)
 
-    video_id = link.split('v=')[-1].split('&')[0]
+    if not video_id:
+        print("❌ Invalid YouTube URL!")
+        return
+
+    # ✅ yt-dlp options
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': os.path.join('static', output_dir, '%(title)s.%(ext)s'),
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'writethumbnail': True,
-        'writeinfojson': True,
+        'outtmpl': outtmpl,
         'noplaylist': True,
         'quiet': True,
+        'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+        'writesubtitles': False,        # 🔒 Disable subtitle fetching to avoid HTTP 429
+        'writeautomaticsub': False,     # 🔒 Disable auto subtitles too
+        'writethumbnail': True,
+        'writeinfojson': True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -40,41 +56,27 @@ def youtube_down(link):
     }
 
     try:
-        print("inside try")
+        print("⬇️  Downloading audio...")
         with YoutubeDL(ydl_opts) as ydl:
-            # Fetch video info
-            info_dict = ydl.extract_info(video_id, download=False)
+            info = ydl.extract_info(video_id, download=False)
 
-            # Extract relevant info
             video_info = {
-                'id': info_dict.get('id', None),
-                'title': info_dict.get('title', None),
-                'rating': info_dict.get('average_rating', None),
-                'author': info_dict.get('uploader', None),
-                'views': info_dict.get('view_count', None),
-                'length': info_dict.get('duration', None),
-                'description': info_dict.get('description', None),
+                'id': info.get('id'),
+                'title': info.get('title'),
+                'author': info.get('uploader'),
+                'views': info.get('view_count'),
+                'length': info.get('duration'),
+                'description': info.get('description'),
             }
 
-            # Download the audio and convert to MP3
             ydl.download([video_id])
-            
-            print('Audio downloaded successfully:', video_info['title'])
+            print(f"✅ Downloaded: {video_info['title']}")
             return video_info['id'], get_safe_title(video_info['title'])
 
     except Exception as e:
-        print('Error:', str(e))
+        print("❌ Error:", str(e))
 
-# Function to sanitize title
-def get_safe_title(title):
-    x = ""
-    for i in title:
-        if not i.isalnum():
-            x += "_"
-        else:
-            x += i
-    return x
-
+# ✅ CLI Entry
 if __name__ == '__main__':
-    youtube_down(input('Enter YouTube video URL: '))
-    
+    link = input("🔗 Enter YouTube video URL: ").strip()
+    youtube_down(link)
